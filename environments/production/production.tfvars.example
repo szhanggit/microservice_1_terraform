@@ -1,0 +1,21 @@
+# Copy to production.tfvars (gitignored) and:
+#   terraform apply -var-file=environments/production/production.tfvars -var-file=environments/production/secrets.tfvars
+
+environment    = "production"
+cluster_name   = "microservice1-production"
+nodegroup_name = "microservice1-production-ng-private1"
+
+region = "ca-central-1"
+
+# t3.medium assumes this account's Free Tier restriction has been lifted by
+# the time production is actually used - drop to t3.small (see develop.tfvars) if not.
+node_instance_type = "t3.medium"
+node_desired_size  = 2
+node_min_size      = 2
+node_max_size      = 4
+
+# Plain RDS PostgreSQL, not Aurora - this account's Free Tier plan blocks
+# Aurora entirely (see database.md's engine/topology note). Assumes production
+# still runs on this same restricted account; bump db_instance_class and
+# reconsider Multi-AZ once/if that's no longer true.
+db_instance_class = "db.t3.micro"

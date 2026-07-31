@@ -1,0 +1,5 @@
+# Copy to backend.tfvars (gitignored) and:
+#   terraform init -backend-config=environments/production/backend.tfvars
+bucket = "steven-zhang-learning"
+key    = "microservice1_prod/terraform.tfstate"
+region = "ca-central-1"
