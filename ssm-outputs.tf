@@ -68,9 +68,9 @@ resource "aws_ssm_parameter" "db_shard_endpoints" {
   name = "${local.ssm_prefix}/db_shard_endpoints"
   type = "String"
   value = jsonencode({
-    shard-0   = module.db_shard_0.address
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1.address
-    shard-2   = module.db_shard_2.address
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting.address
   })
 }
@@ -98,9 +98,9 @@ resource "aws_ssm_parameter" "keda_trigger_auth_role_arn" {
 # Terraform.md §10).
 resource "aws_secretsmanager_secret" "db_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 
@@ -114,9 +114,9 @@ resource "aws_secretsmanager_secret" "db_connection_string" {
 
 resource "aws_secretsmanager_secret_version" "db_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 
@@ -130,9 +130,9 @@ resource "aws_secretsmanager_secret_version" "db_connection_string" {
 # created by Terraform - see variables.tf's db_readonly_username/password.
 resource "aws_secretsmanager_secret" "db_readonly_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 
@@ -142,9 +142,9 @@ resource "aws_secretsmanager_secret" "db_readonly_connection_string" {
 
 resource "aws_secretsmanager_secret_version" "db_readonly_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 

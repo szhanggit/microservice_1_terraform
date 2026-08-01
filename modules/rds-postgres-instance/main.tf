@@ -5,11 +5,11 @@ resource "aws_security_group" "this" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "PostgreSQL from within the VPC"
+    description = "PostgreSQL from within the VPC, plus any explicitly allowed external CIDRs (e.g. local dev)"
     from_port   = var.port
     to_port     = var.port
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr_block]
+    cidr_blocks = concat([var.vpc_cidr_block], var.additional_ingress_cidr_blocks)
   }
 
   tags = {
@@ -18,9 +18,20 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_db_subnet_group" "this" {
-  name        = "${var.instance_identifier}-subnetgroup"
+  # Name varies with publicly_accessible so switching subnet sets creates a
+  # *new* subnet group instead of trying to ModifyDBSubnetGroup the existing
+  # one - AWS refuses to remove subnets from a group while an instance is
+  # still actively using them ("Some of the subnets to be deleted are
+  # currently in use"). create_before_destroy below then lets the instance
+  # relocate onto the new group (a supported ModifyDBInstance operation)
+  # before the now-unused old group gets destroyed.
+  name        = var.publicly_accessible ? "${var.instance_identifier}-subnetgroup-public" : "${var.instance_identifier}-subnetgroup"
   description = "Subnet group for ${var.instance_identifier}"
   subnet_ids  = var.private_subnet_ids
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   tags = {
     Name = "${var.instance_identifier}-subnetgroup"

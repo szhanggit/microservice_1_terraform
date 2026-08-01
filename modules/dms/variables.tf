@@ -17,9 +17,9 @@ variable "private_subnet_ids" {
 }
 
 variable "replication_instance_class" {
-  description = "Smallest usable DMS instance class for a demo (Terraform.md §3)"
+  description = "Smallest usable DMS instance class for a demo (Terraform.md §3) - dms.t3.micro is no longer orderable (see `aws dms describe-orderable-replication-instances`), dms.t3.small is the current floor"
   type        = string
-  default     = "dms.t3.micro"
+  default     = "dms.t3.small"
 }
 
 variable "allocated_storage" {

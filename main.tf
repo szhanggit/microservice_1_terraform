@@ -181,6 +181,10 @@ resource "kubernetes_namespace" "app" {
 # SQS.md, TransactionGateway.md, and TransactionService.md - see Terraform.md
 # §6 for the full mapping.
 
+/* Dropped to fit the account's current RDS instance ceiling (only 2 concurrent
+   creates succeeded on 2026-08-01 despite the account's Service Quota for "DB
+   instances" showing 40 - looks like an AWS-side new-account/free-tier
+   throttle, not a config problem). Re-enable once the account can take more.
 module "db_shard_0" {
   source = "./modules/rds-postgres-instance"
 
@@ -195,22 +199,34 @@ module "db_shard_0" {
 
   depends_on = [module.vpc]
 }
+*/
 
 module "db_shard_1" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier        = "${var.cluster_name}-shard-1"
-  vpc_id                     = module.vpc.vpc_id
-  vpc_cidr_block             = var.vpc_cidr_block
-  private_subnet_ids         = module.vpc.private_subnet_ids
-  master_username            = var.db_master_username
-  master_password            = var.db_master_password
-  instance_class              = var.db_instance_class
-  enable_logical_replication  = true
+  instance_identifier            = "${var.cluster_name}-shard-1"
+  vpc_id                         = module.vpc.vpc_id
+  vpc_cidr_block                 = var.vpc_cidr_block
+  # Temporary: public subnets (routed to the IGW) instead of private
+  # (NAT-only, outbound-only) - publicly_accessible alone doesn't help if the
+  # subnet itself has no inbound path from the internet. Security group
+  # (locked to local_dev_ip_cidr's /32 + the VPC CIDR) is the real gate, not
+  # subnet placement. Falls back to private subnets once local_dev_ip_cidr is
+  # emptied out again - see variables.tf's note.
+  private_subnet_ids             = length(var.local_dev_ip_cidr) > 0 ? module.vpc.public_subnet_ids : module.vpc.private_subnet_ids
+  master_username                = var.db_master_username
+  master_password                = var.db_master_password
+  instance_class                  = var.db_instance_class
+  enable_logical_replication      = true
+  publicly_accessible             = length(var.local_dev_ip_cidr) > 0
+  additional_ingress_cidr_blocks  = var.local_dev_ip_cidr
 
   depends_on = [module.vpc]
 }
 
+/* Dropped alongside shard_0 to fit the account's proven RDS instance ceiling
+   (2 concurrent creates) - keeping shard_1 + reporting = 2 total. Re-enable
+   once the account can take more.
 module "db_shard_2" {
   source = "./modules/rds-postgres-instance"
 
@@ -225,17 +241,21 @@ module "db_shard_2" {
 
   depends_on = [module.vpc]
 }
+*/
 
 module "db_reporting" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-reporting"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier             = "${var.cluster_name}-reporting"
+  vpc_id                          = module.vpc.vpc_id
+  vpc_cidr_block                  = var.vpc_cidr_block
+  # Temporary: public subnets - see db_shard_1's comment above for why.
+  private_subnet_ids              = length(var.local_dev_ip_cidr) > 0 ? module.vpc.public_subnet_ids : module.vpc.private_subnet_ids
+  master_username                 = var.db_master_username
+  master_password                 = var.db_master_password
+  instance_class                  = var.db_instance_class
+  publicly_accessible             = length(var.local_dev_ip_cidr) > 0
+  additional_ingress_cidr_blocks  = var.local_dev_ip_cidr
 
   depends_on = [module.vpc]
 }
@@ -248,6 +268,7 @@ module "db_reporting" {
 # across unrelated module addresses isn't guaranteed). The DB instance itself
 # has no prior state to move - every aws_rds_cluster create attempt failed
 # before the resource was ever actually created, so it's a clean "add".
+/* shard_0 dropped for now - see the commented module "db_shard_0" above.
 moved {
   from = module.aurora_shard_0.aws_security_group.this
   to   = module.db_shard_0.aws_security_group.this
@@ -256,6 +277,7 @@ moved {
   from = module.aurora_shard_0.aws_db_subnet_group.this
   to   = module.db_shard_0.aws_db_subnet_group.this
 }
+*/
 moved {
   from = module.aurora_shard_1.aws_security_group.this
   to   = module.db_shard_1.aws_security_group.this
@@ -264,6 +286,7 @@ moved {
   from = module.aurora_shard_1.aws_db_subnet_group.this
   to   = module.db_shard_1.aws_db_subnet_group.this
 }
+/* shard_2 dropped for now - see the commented module "db_shard_2" above.
 moved {
   from = module.aurora_shard_2.aws_security_group.this
   to   = module.db_shard_2.aws_security_group.this
@@ -272,6 +295,7 @@ moved {
   from = module.aurora_shard_2.aws_db_subnet_group.this
   to   = module.db_shard_2.aws_db_subnet_group.this
 }
+*/
 moved {
   from = module.aurora_reporting.aws_security_group.this
   to   = module.db_reporting.aws_security_group.this
@@ -303,6 +327,7 @@ module "dms" {
   depends_on = [module.db_reporting]
 }
 
+/* shard_0 dropped for now - see the commented module "db_shard_0" above.
 module "dms_source_task_shard_0" {
   source = "./modules/dms-source-endpoint-task"
 
@@ -317,6 +342,7 @@ module "dms_source_task_shard_0" {
 
   depends_on = [module.dms, module.db_shard_0]
 }
+*/
 
 module "dms_source_task_shard_1" {
   source = "./modules/dms-source-endpoint-task"
@@ -333,6 +359,7 @@ module "dms_source_task_shard_1" {
   depends_on = [module.dms, module.db_shard_1]
 }
 
+/* shard_2 dropped for now - see the commented module "db_shard_2" above.
 module "dms_source_task_shard_2" {
   source = "./modules/dms-source-endpoint-task"
 
@@ -347,6 +374,7 @@ module "dms_source_task_shard_2" {
 
   depends_on = [module.dms, module.db_shard_2]
 }
+*/
 
 module "dynamodb" {
   source = "./modules/dynamodb"
