@@ -27,6 +27,26 @@ resource "aws_db_subnet_group" "this" {
   }
 }
 
+# Only created for DMS CDC source instances (database.md §7) - rds.logical_replication
+# is a static parameter, so RDS requires it via a parameter group rather than a
+# direct instance setting, and applying it forces a reboot to take effect.
+resource "aws_db_parameter_group" "logical_replication" {
+  count = var.enable_logical_replication ? 1 : 0
+
+  name   = "${var.instance_identifier}-logical-replication"
+  family = var.parameter_group_family
+
+  parameter {
+    name         = "rds.logical_replication"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
+
+  tags = {
+    Name = "${var.instance_identifier}-logical-replication"
+  }
+}
+
 # Plain RDS (not Aurora) - this account's Free Tier plan blocks Aurora cluster
 # creation entirely: first the engine type (aurora-mysql rejected outright),
 # then - after switching to aurora-postgresql - the cluster-creation mode
@@ -57,6 +77,7 @@ resource "aws_db_instance" "this" {
   vpc_security_group_ids = [aws_security_group.this.id]
   publicly_accessible    = var.publicly_accessible
   multi_az               = var.multi_az
+  parameter_group_name   = var.enable_logical_replication ? aws_db_parameter_group.logical_replication[0].name : null
 
   backup_retention_period = var.backup_retention_period
   skip_final_snapshot     = var.skip_final_snapshot

@@ -184,13 +184,14 @@ resource "kubernetes_namespace" "app" {
 module "db_shard_0" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-0"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier        = "${var.cluster_name}-shard-0"
+  vpc_id                     = module.vpc.vpc_id
+  vpc_cidr_block             = var.vpc_cidr_block
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  master_username            = var.db_master_username
+  master_password            = var.db_master_password
+  instance_class              = var.db_instance_class
+  enable_logical_replication  = true
 
   depends_on = [module.vpc]
 }
@@ -198,13 +199,14 @@ module "db_shard_0" {
 module "db_shard_1" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-1"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier        = "${var.cluster_name}-shard-1"
+  vpc_id                     = module.vpc.vpc_id
+  vpc_cidr_block             = var.vpc_cidr_block
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  master_username            = var.db_master_username
+  master_password            = var.db_master_password
+  instance_class              = var.db_instance_class
+  enable_logical_replication  = true
 
   depends_on = [module.vpc]
 }
@@ -212,13 +214,14 @@ module "db_shard_1" {
 module "db_shard_2" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-2"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier        = "${var.cluster_name}-shard-2"
+  vpc_id                     = module.vpc.vpc_id
+  vpc_cidr_block             = var.vpc_cidr_block
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  master_username            = var.db_master_username
+  master_password            = var.db_master_password
+  instance_class              = var.db_instance_class
+  enable_logical_replication  = true
 
   depends_on = [module.vpc]
 }
@@ -276,6 +279,73 @@ moved {
 moved {
   from = module.aurora_reporting.aws_db_subnet_group.this
   to   = module.db_reporting.aws_db_subnet_group.this
+}
+
+# --- CDC pipeline (database.md §7, Terraform.md §3/§6) ---
+# Feeds the reporting instance so TransactionService's SearchByDateRange has
+# real data to query. Requires scripts/bootstrap-dms-roles.sh run once first.
+# UNVALIDATED - written but not yet applied against real AWS.
+
+module "dms" {
+  source = "./modules/dms"
+
+  replication_instance_id = "${var.cluster_name}-cdc"
+  vpc_id                  = module.vpc.vpc_id
+  vpc_cidr_block          = var.vpc_cidr_block
+  private_subnet_ids      = module.vpc.private_subnet_ids
+
+  target_server_name   = module.db_reporting.address
+  target_port           = module.db_reporting.port
+  target_database_name = module.db_reporting.database_name
+  target_username       = var.db_master_username
+  target_password       = var.db_master_password
+
+  depends_on = [module.db_reporting]
+}
+
+module "dms_source_task_shard_0" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 0
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_0.address
+  source_port               = module.db_shard_0.port
+  source_database_name     = module.db_shard_0.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_0]
+}
+
+module "dms_source_task_shard_1" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 1
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_1.address
+  source_port               = module.db_shard_1.port
+  source_database_name     = module.db_shard_1.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_1]
+}
+
+module "dms_source_task_shard_2" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 2
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_2.address
+  source_port               = module.db_shard_2.port
+  source_database_name     = module.db_shard_2.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_2]
 }
 
 module "dynamodb" {

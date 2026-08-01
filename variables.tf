@@ -122,3 +122,21 @@ variable "db_instance_class" {
   type        = string
   default     = "db.t3.micro"
 }
+
+# --- Read-only DB credentials for TransactionService's search path (new -
+# TransactionService.md §2/§6) - a separate role from db_master_* above, so a
+# bug in the search path can't write/delete data. Terraform only stores these
+# in Secrets Manager (ssm-outputs.tf); it does not create the underlying
+# Postgres role itself - that's the migration tooling's job (database.md §11
+# Phase 2, not yet built - same pre-existing gap as the write-path schema).
+
+variable "db_readonly_username" {
+  type    = string
+  default = "transactionservice_reader"
+}
+
+variable "db_readonly_password" {
+  description = "Password for the read-only role, all 4 instances. Set in a local-only secrets.tfvars file, never commit it."
+  type        = string
+  sensitive   = true
+}
