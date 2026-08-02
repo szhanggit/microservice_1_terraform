@@ -65,6 +65,12 @@ locals {
   # (Terraform.md §6).
   queue_name          = "TransactionQueue-${var.environment}"
   dynamodb_table_name = "transaction-claims-${var.environment}"
+
+  # Must match modules/keda's `namespace` variable default. Used as a plain
+  # string (not module.keda.namespace) in irsa_keda_trigger_auth below to
+  # avoid a dependency cycle: module.keda needs that module's role_arn
+  # output, so that module can't in turn depend on module.keda's own output.
+  keda_namespace = "keda"
 }
 
 module "vpc" {
@@ -163,6 +169,9 @@ module "ecr" {
 
 module "keda" {
   source = "./modules/keda"
+
+  namespace         = local.keda_namespace
+  operator_role_arn = module.irsa_keda_trigger_auth.role_arn
 
   depends_on = [module.eks_nodegroup]
 }
@@ -466,9 +475,17 @@ module "irsa_transaction_worker" {
 }
 
 # This is what the KEDA aws-sqs-queue scaler's TriggerAuthentication uses to
-# read ApproximateNumberOfMessages (KEDA.md §6) - the service account lives in
-# the app namespace alongside the ScaledObject it authenticates, not in the
-# keda namespace where the KEDA operator itself runs.
+# read ApproximateNumberOfMessages (KEDA.md §6). Targets the KEDA operator's
+# OWN ServiceAccount (keda namespace), not a dedicated SA in the app
+# namespace: confirmed live that TriggerAuthentication's identityOwner=
+# workload (using transaction-worker's own already-correct IRSA role)
+# doesn't work for scale-from-zero polling even with a live target pod
+# running, so this falls back to the standard/documented pattern of
+# annotating the operator's own SA instead. modules/keda wires role_arn
+# below into the Helm release's serviceAccount.operator.annotations value -
+# create_service_account=false because Helm (not Terraform) owns that
+# ServiceAccount object; this module produces only the IAM role/trust-policy
+# half.
 data "aws_iam_policy_document" "keda_trigger_auth" {
   statement {
     effect    = "Allow"
@@ -480,12 +497,11 @@ data "aws_iam_policy_document" "keda_trigger_auth" {
 module "irsa_keda_trigger_auth" {
   source = "./modules/irsa-service-role"
 
-  role_name             = "${var.cluster_name}-keda-trigger-auth-role"
-  oidc_provider_arn     = module.eks_cluster.oidc_provider_arn
-  oidc_provider_url     = module.eks_cluster.oidc_provider_url
-  namespace             = local.app_namespace
-  service_account_name  = "keda-trigger-auth"
-  policy_json           = data.aws_iam_policy_document.keda_trigger_auth.json
-
-  depends_on = [kubernetes_namespace.app]
+  role_name               = "${var.cluster_name}-keda-trigger-auth-role"
+  oidc_provider_arn       = module.eks_cluster.oidc_provider_arn
+  oidc_provider_url       = module.eks_cluster.oidc_provider_url
+  namespace               = local.keda_namespace
+  service_account_name    = "keda-operator"
+  policy_json             = data.aws_iam_policy_document.keda_trigger_auth.json
+  create_service_account  = false
 }
