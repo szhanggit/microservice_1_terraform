@@ -18,6 +18,12 @@ resource "aws_dms_endpoint" "source" {
   username      = var.source_username
   password      = var.source_password
 
+  # Both shard and reporting RDS instances enforce rds.force_ssl=1
+  # (database.md §6/§7); DMS's default ssl_mode is "none", which RDS
+  # rejects outright - endpoint connection tests fail with "no pg_hba.conf
+  # entry for host ..., no encryption" until this is set.
+  ssl_mode = "require"
+
   tags = {
     Name = "microservice1-shard-${var.shard_id}-source"
   }

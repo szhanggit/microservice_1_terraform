@@ -70,6 +70,11 @@ resource "aws_dms_endpoint" "reporting_target" {
   username      = var.target_username
   password      = var.target_password
 
+  # rds.force_ssl=1 on the reporting instance (database.md §7) rejects
+  # DMS's default ssl_mode="none" - see modules/dms-source-endpoint-task's
+  # matching source-endpoint comment for the exact failure mode.
+  ssl_mode = "require"
+
   tags = {
     Name = "${var.replication_instance_id}-target-reporting"
   }
