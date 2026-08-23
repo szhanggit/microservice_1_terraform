@@ -3,9 +3,9 @@ output "role_arn" {
 }
 
 output "service_account_name" {
-  value = kubernetes_service_account.this.metadata[0].name
+  value = var.create_service_account ? kubernetes_service_account.this[0].metadata[0].name : null
 }
 
 output "namespace" {
-  value = kubernetes_service_account.this.metadata[0].namespace
+  value = var.create_service_account ? kubernetes_service_account.this[0].metadata[0].namespace : null
 }

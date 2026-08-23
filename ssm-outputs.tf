@@ -68,9 +68,9 @@ resource "aws_ssm_parameter" "db_shard_endpoints" {
   name = "${local.ssm_prefix}/db_shard_endpoints"
   type = "String"
   value = jsonencode({
-    shard-0   = module.db_shard_0.address
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1.address
-    shard-2   = module.db_shard_2.address
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting.address
   })
 }
@@ -98,9 +98,9 @@ resource "aws_ssm_parameter" "keda_trigger_auth_role_arn" {
 # Terraform.md §10).
 resource "aws_secretsmanager_secret" "db_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 
@@ -114,12 +114,40 @@ resource "aws_secretsmanager_secret" "db_connection_string" {
 
 resource "aws_secretsmanager_secret_version" "db_connection_string" {
   for_each = {
-    shard-0   = module.db_shard_0
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1
-    shard-2   = module.db_shard_2
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting
   }
 
   secret_id     = aws_secretsmanager_secret.db_connection_string[each.key].id
   secret_string = "Server=${each.value.address};Port=${each.value.port};Database=${each.value.database_name};User=${var.db_master_username};Password=${var.db_master_password};"
+}
+
+# Read-only DB connection strings for TransactionService's search path (new -
+# TransactionService.md §2/§6) - separate secrets from the master ones above,
+# since it's a different (read-only) Postgres role. The role itself isn't
+# created by Terraform - see variables.tf's db_readonly_username/password.
+resource "aws_secretsmanager_secret" "db_readonly_connection_string" {
+  for_each = {
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
+    shard-1   = module.db_shard_1
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
+    reporting = module.db_reporting
+  }
+
+  name                    = "microservice1/${var.environment}/db-${each.key}-readonly-connection-string"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "db_readonly_connection_string" {
+  for_each = {
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
+    shard-1   = module.db_shard_1
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
+    reporting = module.db_reporting
+  }
+
+  secret_id     = aws_secretsmanager_secret.db_readonly_connection_string[each.key].id
+  secret_string = "Server=${each.value.address};Port=${each.value.port};Database=${each.value.database_name};User=${var.db_readonly_username};Password=${var.db_readonly_password};"
 }

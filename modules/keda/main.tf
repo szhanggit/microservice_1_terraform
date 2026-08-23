@@ -16,5 +16,10 @@ resource "helm_release" "keda" {
   version    = var.chart_version
   namespace  = kubernetes_namespace.keda.metadata[0].name
 
+  set {
+    name  = "serviceAccount.operator.annotations.eks\\.amazonaws\\.com/role-arn"
+    value = var.operator_role_arn
+  }
+
   depends_on = [kubernetes_namespace.keda]
 }

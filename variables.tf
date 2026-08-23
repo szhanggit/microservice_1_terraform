@@ -66,8 +66,9 @@ variable "node_instance_type" {
 }
 
 variable "node_desired_size" {
-  type    = number
-  default = 2
+  description = "4, not 2: at t3.small's 8-pods/node ceiling (5 schedulable slots after aws-node/kube-proxy/ebs-csi-node daemonsets), the ~10 baseline add-on pods (CoreDNS, EBS CSI controller, KEDA, ALB controller, external-dns, cluster-autoscaler) alone don't fit in 2 nodes - and cluster-autoscaler/ALB controller/external-dns are IRSA-only here (the actual pods come from a separate app-deploy pipeline), so nothing scales the node group past this floor until that pipeline is running."
+  type        = number
+  default     = 4
 }
 
 variable "node_min_size" {
@@ -76,9 +77,9 @@ variable "node_min_size" {
 }
 
 variable "node_max_size" {
-  description = "Sized for up to 5 replicas of TransactionWorker (KEDA-scaled) plus TransactionGateway/TransactionService plus cluster add-ons"
+  description = "Sized for up to 5 replicas of TransactionWorker (KEDA-scaled) plus TransactionGateway/TransactionService plus cluster add-ons (~19 pods at peak, needing ~4 nodes at 5 schedulable slots/node) with headroom for rolling-update overlap"
   type        = number
-  default     = 4
+  default     = 8
 }
 
 variable "node_volume_size" {
@@ -121,4 +122,28 @@ variable "db_instance_class" {
   description = "Free Tier eligible RDS instance class - matches microservice_0's own rds module default. Single-AZ, single-instance only (no reader/replica) - Free Tier here doesn't support Multi-AZ."
   type        = string
   default     = "db.t3.micro"
+}
+
+variable "local_dev_ip_cidr" {
+  description = "Temporary: developer's current public IP (as a /32 CIDR) allowed to reach the shard-1/reporting RDS instances directly for local debugging, since neither instance is reachable from outside the VPC otherwise (database.md/Terraform.md's local-dev-against-real-AWS approach doesn't cover VPC-private resources). Update this whenever your IP changes; revert to [] once local debugging no longer needs direct DB access. ElastiCache has no equivalent option - it cannot be made publicly accessible at all."
+  type        = list(string)
+  default     = []
+}
+
+# --- Read-only DB credentials for TransactionService's search path (new -
+# TransactionService.md §2/§6) - a separate role from db_master_* above, so a
+# bug in the search path can't write/delete data. Terraform only stores these
+# in Secrets Manager (ssm-outputs.tf); it does not create the underlying
+# Postgres role itself - that's the migration tooling's job (database.md §11
+# Phase 2, not yet built - same pre-existing gap as the write-path schema).
+
+variable "db_readonly_username" {
+  type    = string
+  default = "transactionservice_reader"
+}
+
+variable "db_readonly_password" {
+  description = "Password for the read-only role, all 4 instances. Set in a local-only secrets.tfvars file, never commit it."
+  type        = string
+  sensitive   = true
 }

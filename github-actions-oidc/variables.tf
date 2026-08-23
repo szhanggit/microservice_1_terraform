@@ -12,22 +12,27 @@ variable "github_repo" {
 # GitHub's OIDC token `sub` claim actually looks like
 # "repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:refs/heads/develop" - immutable
 # numeric IDs are embedded alongside the names specifically so a trust policy
-# can't be silently hijacked if this org/repo is later renamed. These are
-# placeholders - the first real AssumeRoleWithWebIdentity call from a GitHub
-# Actions workflow will fail AccessDenied against a name-only policy; find the
-# real values afterwards via CloudTrail (`aws cloudtrail lookup-events
-# --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity`)
-# and update these two, then re-apply (Terraform.md §9).
+# can't be silently hijacked if this org/repo is later renamed.
+#
+# RESOLVED (2026-08-02): github_repo_id was still the placeholder "0" -
+# confirmed via `gh api repos/szhanggit/microservice_1 --jq '.id'`
+# (1316490731) after a real workflow run failed with credentials never even
+# being loaded (a separate, prior bug - AWS_GITHUB_ACTIONS_ROLE_ARN was never
+# set as a GitHub secret at all, fixed separately via `gh secret set`).
+# github_owner_id was already correct (`gh api user --jq '.id'` = 17355395).
+# The live IAM role's trust policy was also patched directly via
+# `aws iam update-assume-role-policy` to match this value immediately,
+# without waiting on the next `terraform apply` from this state.
 variable "github_owner_id" {
-  description = "Immutable numeric ID for the szhanggit account/org - placeholder, confirm via CloudTrail (see comment above)"
+  description = "Immutable numeric ID for the szhanggit account/org"
   type        = string
   default     = "17355395"
 }
 
 variable "github_repo_id" {
-  description = "Immutable numeric ID for the microservice_1 repo - placeholder, confirm via CloudTrail (see comment above)"
+  description = "Immutable numeric ID for the microservice_1 repo (gh api repos/szhanggit/microservice_1 --jq '.id')"
   type        = string
-  default     = "0"
+  default     = "1316490731"
 }
 
 variable "role_name" {

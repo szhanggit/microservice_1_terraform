@@ -94,9 +94,9 @@ output "keda_namespace" {
 output "db_shard_endpoints" {
   description = "Map of shard name -> RDS instance address (hostname only, no port)"
   value = {
-    shard-0   = module.db_shard_0.address
+    # shard-0 dropped for now - see the commented module "db_shard_0" in main.tf
     shard-1   = module.db_shard_1.address
-    shard-2   = module.db_shard_2.address
+    # shard-2 dropped for now - see the commented module "db_shard_2" in main.tf
     reporting = module.db_reporting.address
   }
 }

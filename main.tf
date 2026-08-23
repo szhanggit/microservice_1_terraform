@@ -65,6 +65,12 @@ locals {
   # (Terraform.md §6).
   queue_name          = "TransactionQueue-${var.environment}"
   dynamodb_table_name = "transaction-claims-${var.environment}"
+
+  # Must match modules/keda's `namespace` variable default. Used as a plain
+  # string (not module.keda.namespace) in irsa_keda_trigger_auth below to
+  # avoid a dependency cycle: module.keda needs that module's role_arn
+  # output, so that module can't in turn depend on module.keda's own output.
+  keda_namespace = "keda"
 }
 
 module "vpc" {
@@ -164,6 +170,9 @@ module "ecr" {
 module "keda" {
   source = "./modules/keda"
 
+  namespace         = local.keda_namespace
+  operator_role_arn = module.irsa_keda_trigger_auth.role_arn
+
   depends_on = [module.eks_nodegroup]
 }
 
@@ -181,58 +190,81 @@ resource "kubernetes_namespace" "app" {
 # SQS.md, TransactionGateway.md, and TransactionService.md - see Terraform.md
 # §6 for the full mapping.
 
+/* Dropped to fit the account's current RDS instance ceiling (only 2 concurrent
+   creates succeeded on 2026-08-01 despite the account's Service Quota for "DB
+   instances" showing 40 - looks like an AWS-side new-account/free-tier
+   throttle, not a config problem). Re-enable once the account can take more.
 module "db_shard_0" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-0"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier        = "${var.cluster_name}-shard-0"
+  vpc_id                     = module.vpc.vpc_id
+  vpc_cidr_block             = var.vpc_cidr_block
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  master_username            = var.db_master_username
+  master_password            = var.db_master_password
+  instance_class              = var.db_instance_class
+  enable_logical_replication  = true
 
   depends_on = [module.vpc]
 }
+*/
 
 module "db_shard_1" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-1"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier            = "${var.cluster_name}-shard-1"
+  vpc_id                         = module.vpc.vpc_id
+  vpc_cidr_block                 = var.vpc_cidr_block
+  # Temporary: public subnets (routed to the IGW) instead of private
+  # (NAT-only, outbound-only) - publicly_accessible alone doesn't help if the
+  # subnet itself has no inbound path from the internet. Security group
+  # (locked to local_dev_ip_cidr's /32 + the VPC CIDR) is the real gate, not
+  # subnet placement. Falls back to private subnets once local_dev_ip_cidr is
+  # emptied out again - see variables.tf's note.
+  private_subnet_ids             = length(var.local_dev_ip_cidr) > 0 ? module.vpc.public_subnet_ids : module.vpc.private_subnet_ids
+  master_username                = var.db_master_username
+  master_password                = var.db_master_password
+  instance_class                  = var.db_instance_class
+  enable_logical_replication      = true
+  publicly_accessible             = length(var.local_dev_ip_cidr) > 0
+  additional_ingress_cidr_blocks  = var.local_dev_ip_cidr
 
   depends_on = [module.vpc]
 }
 
+/* Dropped alongside shard_0 to fit the account's proven RDS instance ceiling
+   (2 concurrent creates) - keeping shard_1 + reporting = 2 total. Re-enable
+   once the account can take more.
 module "db_shard_2" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-shard-2"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier        = "${var.cluster_name}-shard-2"
+  vpc_id                     = module.vpc.vpc_id
+  vpc_cidr_block             = var.vpc_cidr_block
+  private_subnet_ids         = module.vpc.private_subnet_ids
+  master_username            = var.db_master_username
+  master_password            = var.db_master_password
+  instance_class              = var.db_instance_class
+  enable_logical_replication  = true
 
   depends_on = [module.vpc]
 }
+*/
 
 module "db_reporting" {
   source = "./modules/rds-postgres-instance"
 
-  instance_identifier = "${var.cluster_name}-reporting"
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr_block      = var.vpc_cidr_block
-  private_subnet_ids  = module.vpc.private_subnet_ids
-  master_username     = var.db_master_username
-  master_password     = var.db_master_password
-  instance_class      = var.db_instance_class
+  instance_identifier             = "${var.cluster_name}-reporting"
+  vpc_id                          = module.vpc.vpc_id
+  vpc_cidr_block                  = var.vpc_cidr_block
+  # Temporary: public subnets - see db_shard_1's comment above for why.
+  private_subnet_ids              = length(var.local_dev_ip_cidr) > 0 ? module.vpc.public_subnet_ids : module.vpc.private_subnet_ids
+  master_username                 = var.db_master_username
+  master_password                 = var.db_master_password
+  instance_class                  = var.db_instance_class
+  publicly_accessible             = length(var.local_dev_ip_cidr) > 0
+  additional_ingress_cidr_blocks  = var.local_dev_ip_cidr
 
   depends_on = [module.vpc]
 }
@@ -245,6 +277,7 @@ module "db_reporting" {
 # across unrelated module addresses isn't guaranteed). The DB instance itself
 # has no prior state to move - every aws_rds_cluster create attempt failed
 # before the resource was ever actually created, so it's a clean "add".
+/* shard_0 dropped for now - see the commented module "db_shard_0" above.
 moved {
   from = module.aurora_shard_0.aws_security_group.this
   to   = module.db_shard_0.aws_security_group.this
@@ -253,6 +286,7 @@ moved {
   from = module.aurora_shard_0.aws_db_subnet_group.this
   to   = module.db_shard_0.aws_db_subnet_group.this
 }
+*/
 moved {
   from = module.aurora_shard_1.aws_security_group.this
   to   = module.db_shard_1.aws_security_group.this
@@ -261,6 +295,7 @@ moved {
   from = module.aurora_shard_1.aws_db_subnet_group.this
   to   = module.db_shard_1.aws_db_subnet_group.this
 }
+/* shard_2 dropped for now - see the commented module "db_shard_2" above.
 moved {
   from = module.aurora_shard_2.aws_security_group.this
   to   = module.db_shard_2.aws_security_group.this
@@ -269,6 +304,7 @@ moved {
   from = module.aurora_shard_2.aws_db_subnet_group.this
   to   = module.db_shard_2.aws_db_subnet_group.this
 }
+*/
 moved {
   from = module.aurora_reporting.aws_security_group.this
   to   = module.db_reporting.aws_security_group.this
@@ -277,6 +313,77 @@ moved {
   from = module.aurora_reporting.aws_db_subnet_group.this
   to   = module.db_reporting.aws_db_subnet_group.this
 }
+
+# --- CDC pipeline (database.md §7, Terraform.md §3/§6) ---
+# Feeds the reporting instance so TransactionService's SearchByDateRange has
+# real data to query. Requires scripts/bootstrap-dms-roles.sh run once first.
+# UNVALIDATED - written but not yet applied against real AWS.
+
+module "dms" {
+  source = "./modules/dms"
+
+  replication_instance_id = "${var.cluster_name}-cdc"
+  vpc_id                  = module.vpc.vpc_id
+  vpc_cidr_block          = var.vpc_cidr_block
+  private_subnet_ids      = module.vpc.private_subnet_ids
+
+  target_server_name   = module.db_reporting.address
+  target_port           = module.db_reporting.port
+  target_database_name = module.db_reporting.database_name
+  target_username       = var.db_master_username
+  target_password       = var.db_master_password
+
+  depends_on = [module.db_reporting]
+}
+
+/* shard_0 dropped for now - see the commented module "db_shard_0" above.
+module "dms_source_task_shard_0" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 0
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_0.address
+  source_port               = module.db_shard_0.port
+  source_database_name     = module.db_shard_0.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_0]
+}
+*/
+
+module "dms_source_task_shard_1" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 1
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_1.address
+  source_port               = module.db_shard_1.port
+  source_database_name     = module.db_shard_1.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_1]
+}
+
+/* shard_2 dropped for now - see the commented module "db_shard_2" above.
+module "dms_source_task_shard_2" {
+  source = "./modules/dms-source-endpoint-task"
+
+  shard_id                 = 2
+  replication_instance_arn = module.dms.replication_instance_arn
+  target_endpoint_arn      = module.dms.target_endpoint_arn
+  source_server_name       = module.db_shard_2.address
+  source_port               = module.db_shard_2.port
+  source_database_name     = module.db_shard_2.database_name
+  source_username           = var.db_master_username
+  source_password           = var.db_master_password
+
+  depends_on = [module.dms, module.db_shard_2]
+}
+*/
 
 module "dynamodb" {
   source = "./modules/dynamodb"
@@ -368,9 +475,17 @@ module "irsa_transaction_worker" {
 }
 
 # This is what the KEDA aws-sqs-queue scaler's TriggerAuthentication uses to
-# read ApproximateNumberOfMessages (KEDA.md §6) - the service account lives in
-# the app namespace alongside the ScaledObject it authenticates, not in the
-# keda namespace where the KEDA operator itself runs.
+# read ApproximateNumberOfMessages (KEDA.md §6). Targets the KEDA operator's
+# OWN ServiceAccount (keda namespace), not a dedicated SA in the app
+# namespace: confirmed live that TriggerAuthentication's identityOwner=
+# workload (using transaction-worker's own already-correct IRSA role)
+# doesn't work for scale-from-zero polling even with a live target pod
+# running, so this falls back to the standard/documented pattern of
+# annotating the operator's own SA instead. modules/keda wires role_arn
+# below into the Helm release's serviceAccount.operator.annotations value -
+# create_service_account=false because Helm (not Terraform) owns that
+# ServiceAccount object; this module produces only the IAM role/trust-policy
+# half.
 data "aws_iam_policy_document" "keda_trigger_auth" {
   statement {
     effect    = "Allow"
@@ -382,12 +497,11 @@ data "aws_iam_policy_document" "keda_trigger_auth" {
 module "irsa_keda_trigger_auth" {
   source = "./modules/irsa-service-role"
 
-  role_name             = "${var.cluster_name}-keda-trigger-auth-role"
-  oidc_provider_arn     = module.eks_cluster.oidc_provider_arn
-  oidc_provider_url     = module.eks_cluster.oidc_provider_url
-  namespace             = local.app_namespace
-  service_account_name  = "keda-trigger-auth"
-  policy_json           = data.aws_iam_policy_document.keda_trigger_auth.json
-
-  depends_on = [kubernetes_namespace.app]
+  role_name               = "${var.cluster_name}-keda-trigger-auth-role"
+  oidc_provider_arn       = module.eks_cluster.oidc_provider_arn
+  oidc_provider_url       = module.eks_cluster.oidc_provider_url
+  namespace               = local.keda_namespace
+  service_account_name    = "keda-operator"
+  policy_json             = data.aws_iam_policy_document.keda_trigger_auth.json
+  create_service_account  = false
 }

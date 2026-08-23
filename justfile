@@ -21,11 +21,11 @@ apply env="develop": (init env)
     terraform validate
     terraform apply -var-file=environments/{{env}}/{{env}}.tfvars -var-file=environments/{{env}}/secrets.tfvars -auto-approve
 
-# Tear down infrastructure. If any Kubernetes Ingress/Service of type
-# LoadBalancer was ever applied against this cluster, delete it FIRST - the
-# ALB the AWS Load Balancer Controller creates isn't a Terraform resource, and
-# its security groups/ENIs can block this from deleting the VPC if it's still
-# around.
+# Tear down infrastructure. Run `just destroy-app <env>` in
+# ../microservice_1/kubernetes FIRST - the ALB the AWS Load Balancer
+# Controller creates for transaction-gateway's Ingress isn't a Terraform
+# resource, and its security groups/ENIs can block this from deleting the VPC
+# if it's still around.
 destroy env="develop": (init env)
     terraform destroy -var-file=environments/{{env}}/{{env}}.tfvars -var-file=environments/{{env}}/secrets.tfvars -auto-approve
 
